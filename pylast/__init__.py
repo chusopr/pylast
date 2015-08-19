@@ -185,6 +185,9 @@ class _Network(object):
         self.last_call_time = 0
         self.limit_rate = False
 
+        self.station_tuned = False
+        self.station_name = None
+
         # Generate a session_key if necessary
         if ((self.api_key and self.api_secret) and not self.session_key and
            (self.username and self.password_hash)):
@@ -788,6 +791,38 @@ class _Network(object):
 
     def get_track_play_links(self, tracks, cacheable=True):
         return self.get_play_links("track", tracks, cacheable)
+
+    def tune(self, url, cacheable=True):
+        """Tunes a radio station"""
+        print(url)
+        self.station_name = _extract(_Request(self, "prototype.tune", {'station': url}).execute(cacheable), "name")
+        self.station_tuned = True
+
+    def get_station_name(self):
+        return self.station_name
+
+    def get_station_tracks(self, cacheable=False):
+        """Returns the tracks on this station."""
+
+        if not self.station_tuned:
+            raise NoStationError
+
+        doc = _Request(self, 'prototype.getPlaylist').execute(cacheable)
+        playlist = doc.getElementsByTagName("playlist")
+        if playlist.length != 1:
+            raise MalformedResponseError(self, "One single <playlist> tag expected.")
+        tracklist = playlist[0].getElementsByTagName("trackList")
+        if tracklist.length != 1:
+            raise MalformedResponseError(self, "One single <trackList> tag expected.")
+
+        seq = []
+        for node in tracklist[0].getElementsByTagName("track"):
+            title = _extract(node, 'title')
+            artist = _extract(node, 'creator')
+
+            seq.append(Track(artist, title, self))
+
+        return seq
 
 
 class LastFMNetwork(_Network):
@@ -2104,6 +2139,18 @@ class Artist(_BaseObject, _Taggable):
 
         return names
 
+    def get_artist_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://artist/" + url_quote_plus(self.get_name())
+
+    def get_fans_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://artist/" + url_quote_plus(self.get_name()) + "/fans"
+
+    def get_similar_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://artist/" + url_quote_plus(self.get_name()) + "/similarartists"
+
 
 class Event(_BaseObject):
     """An event."""
@@ -2944,6 +2991,10 @@ class Tag(_BaseObject, _Chartable):
 
         return self.network._get_url(domain_name, "tag") % {'name': name}
 
+    def get_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://globaltags/" + url_quote_plus(self.get_name())
+
 
 class Track(_Opus):
     """A Last.fm track."""
@@ -3708,6 +3759,26 @@ class User(_BaseObject, _Chartable):
         params["message"] = message
 
         self._request(self.ws_prefix + ".Shout", False, params)
+
+    def get_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://user/" + url_quote_plus(self.get_name())
+
+    def get_library_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://user/" + url_quote_plus(self.get_name()) + "/library"
+
+    def get_mix_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://user/" + url_quote_plus(self.get_name()) + "/mix"
+
+    def get_recommended_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://user/" + url_quote_plus(self.get_name()) + "/recommended"
+
+    def get_neighbours_station_url(self):
+        """Returns radio station URL for this artist"""
+        return "lastfm://user/" + url_quote_plus(self.get_name()) + "/neighbours"
 
 
 class AuthenticatedUser(User):
@@ -4476,5 +4547,15 @@ class Scrobbler(object):
 
         if remainder:
             self.scrobble_many(remainder)
+
+class NoStationError(Exception):
+    """Tried to use a radio station before tunning it"""
+    def __init__(self):
+        Exception.__init__(self)
+        self.message = "No station tuned. Tune a station first."
+
+    @_string_output
+    def __str__(self):
+        return self.message
 
 # End of file
